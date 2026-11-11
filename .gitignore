@@ -1,0 +1,9 @@
+target/
+bin/
+obj/
+build/
+node_modules/
+.idea/workspace.xml
+*.iml
+.DS_Store
+.env

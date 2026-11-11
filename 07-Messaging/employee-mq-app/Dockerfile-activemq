@@ -1,0 +1,11 @@
+FROM rmohr/activemq
+
+EXPOSE 61616
+EXPOSE 8161
+
+VOLUME /data/activemq
+VOLUME /var/log/activemq
+
+RUN find /opt/activemq/ -type d -exec chmod 777 {} \;
+
+USER 999
