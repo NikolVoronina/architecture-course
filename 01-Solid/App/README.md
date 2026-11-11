@@ -1,46 +1,131 @@
-# SOLID: рефакторинг PensionService
+# 01 · SOLID — Refactoring PensionService
 
-**Исходная ситуация:** один класс `PensionService` делал всё сразу: считал пенсию через цепочку `if`, сохранял результат в базу и печатал отчёт.
+Assignment: refactor a "bad" pension calculation class so that it follows the **SOLID** principles.
 
-Запуск: `mypackage.Main`. Тесты: `mvn test`.
+## Before
 
-## Задание 1. SRP и ISP
+One class did everything: calculated the pension, saved the result and printed a report.
 
-### S — Single Responsibility (одна ответственность)
-- **Проблема:** в одном классе три разные работы — расчёт, сохранение и отчёт.
-- **Что сделали:** разделили код на классы с одной задачей:
-  - `model/Employee` — данные сотрудника
-  - `calculation/` — расчёт пенсии
-  - `persistence/RdbmsPensionRepository` — сохранение
-  - `reporting/ConsoleReportGenerator` — отчёт
-  - `service/PensionService` — только координирует остальных
-- **Как проверили:** поменяли текст в `ConsoleReportGenerator` — изменилась только строчка отчёта.
+```java
+public class PensionService {
+    public void processEmployee(String name, int age, double salary, String type) {
+        if (type.equals("REGULAR"))   { /* 5%  → print → save */ }
+        if (type.equals("EXECUTIVE")) { /* 10% + 1000 → print → save */ }
+    }
+    public void saveToDatabase(String name, double pension) { ... }
+    public void generateReport(String name) { ... }
+}
+```
 
-### I — Interface Segregation (разделение интерфейсов)
-- **Проблема:** клиенту, которому нужен только отчёт, приходилось зависеть от всего класса.
-- **Что сделали:** маленькие интерфейсы с одним методом: `ReportGenerator`, `PensionRepository`, `PensionCalculator`.
-- **Как проверили:** в `PensionRepository` всего один метод — `save`.
+## After
 
-## Задание 2. OCP и LSP
+```mermaid
+classDiagram
+    direction LR
+    class Main {
+        <<composition root>>
+    }
+    class PensionService {
+        +processEmployee(Employee) double
+    }
+    class PensionCalculator {
+        <<interface>>
+        +calculate(Employee) double
+    }
+    class PensionPolicy {
+        <<interface>>
+        +type() String
+        +calculate(Employee) double
+    }
+    class PensionRepository {
+        <<interface>>
+        +save(String, double)
+    }
+    class ReportGenerator {
+        <<interface>>
+        +generateReport(String)
+    }
 
-### O — Open/Closed (открыт для расширения, закрыт для изменения)
-- **Проблема:** новый тип сотрудника требовал нового `if` внутри работающего кода.
-- **Что сделали:** интерфейс `PensionPolicy` и отдельный класс на каждый тип: `RegularPensionPolicy` (5%), `ExecutivePensionPolicy` (10% + 1000). Нужное правило выбирает `PolicyBasedPensionCalculator`.
-- **Как проверили:** добавили стажёра — новый класс `InternPensionPolicy` (2%) и одну строку в `Main`. Результат: 430 000 × 2% = 8 600. Старые классы не изменились.
+    Main ..> PensionService : creates
+    PensionService --> PensionCalculator
+    PensionService --> PensionRepository
+    PensionCalculator <|.. PolicyBasedPensionCalculator
+    PolicyBasedPensionCalculator --> PensionPolicy
+    PensionPolicy <|.. RegularPensionPolicy
+    PensionPolicy <|.. ExecutivePensionPolicy
+    PensionPolicy <|.. InternPensionPolicy
+    PensionRepository <|.. RdbmsPensionRepository
+    PensionRepository <|.. InMemoryPensionRepository
+    ReportGenerator <|.. ConsoleReportGenerator
+```
 
-### L — Liskov Substitution (подстановка Лисков)
-- **Проблема:** калькулятор вызывает любое правило не глядя; если правило нарушает обещания, ломается вся программа.
-- **Что сделали:** описали контракт `PensionPolicy`: пенсия не отрицательная, метод не падает на нормальных данных, только считает (без печати и сохранения). `ExecutivePensionPolicy` не наследуется от `RegularPensionPolicy`.
-- **Как проверили:** без `implements PensionPolicy` код не компилируется; а заведомо неправильное число Java пропустила — честность реализации проверяет программист (и тесты), а не компилятор.
+```
+src/main/java/mypackage
+├── Main.java                         ← wires the app together (the only place using new)
+├── model/Employee.java               ← employee data
+├── calculation/
+│   ├── PensionCalculator.java        ← interface: "can calculate"
+│   ├── PolicyBasedPensionCalculator  ← picks the policy by employee type
+│   ├── PensionPolicy.java            ← policy interface + contract
+│   ├── RegularPensionPolicy          ← 5%
+│   ├── ExecutivePensionPolicy        ← 10% + 1000
+│   └── InternPensionPolicy           ← 2% (added to demonstrate OCP)
+├── persistence/
+│   ├── PensionRepository.java        ← interface: "can save"
+│   ├── RdbmsPensionRepository        ← saves to a database
+│   └── InMemoryPensionRepository     ← saves in memory
+├── reporting/
+│   ├── ReportGenerator.java          ← interface: "can generate a report"
+│   └── ConsoleReportGenerator
+└── service/PensionService.java       ← coordinates calculation and saving
+```
 
-## Задание 3. DIP
+## Principles by task
 
-### D — Dependency Inversion (инверсия зависимостей)
-- **Проблема:** сервис был жёстко привязан к базе данных.
-- **Что сделали:** `PensionService` работает только с интерфейсами и получает их через конструктор; конкретные классы создаются только в `Main`.
-- **Как проверили:** заменили в `Main` `RdbmsPensionRepository` на `InMemoryPensionRepository` — `PensionService` не меняли.
+### Task 1 · SRP and ISP
 
-## Задание 4. Дополнительно
-**Сделано:** проверка входных данных в `Employee`; ошибка для неизвестного типа сотрудника; тесты.
+| | Problem | Solution | Verification |
+|---|---|---|---|
+| **S** — Single Responsibility | Three different jobs in one class | A separate class for each job: calculation, persistence, reporting, coordination | Changed the report text — calculation and saving were unaffected |
+| **I** — Interface Segregation | A client that only needed reports depended on the whole class | Small single-method interfaces: `PensionCalculator`, `PensionRepository`, `ReportGenerator` | `PensionRepository` has only `save` |
 
-**Можно улучшить:** `BigDecimal` вместо `double` для денег; `enum` вместо строк для типа; логгер вместо `System.out.println`.
+### Task 2 · OCP and LSP
+
+| | Problem | Solution | Verification |
+|---|---|---|---|
+| **O** — Open/Closed | A new employee type meant a new `if` in working code | A `PensionPolicy` interface with one class per type | Added `InternPensionPolicy` (2%) without touching existing classes: 430,000 × 2% = 8,600 |
+| **L** — Liskov Substitution | The calculator calls any policy blindly | Contract: pension ≥ 0, no exceptions on valid input, no side effects. `Executive` does not inherit from `Regular` | Without `implements` the code does not compile; a wrong formula still compiles — tests catch it |
+
+### Task 3 · DIP
+
+| | Problem | Solution | Verification |
+|---|---|---|---|
+| **D** — Dependency Inversion | The service was hard-wired to the database | `PensionService` depends only on interfaces, injected via the constructor; `new` is used only in `Main` | Swapped `RdbmsPensionRepository` for `InMemoryPensionRepository` with one line in `Main`; the service was unchanged |
+
+### Task 4 · Additional considerations
+
+**Done**
+- `Employee` validates its input (blank name, negative salary)
+- Unknown employee type → a clear error instead of silently doing nothing
+- Tests: the `PensionPolicy` contract for every policy, calculations, the service with substituted dependencies
+
+**Possible improvements**
+- `BigDecimal` instead of `double` for money
+- An `enum` instead of strings for the employee type
+- A logger instead of `System.out.println`
+
+## Running
+
+- **App:** open `Main.java` in IntelliJ and click ▶
+- **Tests:** `mvn test` (or right-click `src/test` → Run)
+
+Sample output:
+
+```
+Saving to RDBMS: Alice -> 25000.0
+REGULAR pension for Alice: 25000.0
+Generating report for... Alice
+Saving to RDBMS: Bob -> 121000.0
+EXECUTIVE pension for Bob: 121000.0
+Generating report for... Bob
+```
